@@ -373,3 +373,4 @@ exports.parse = parse;
     process.stdout.write(json);
 })();
 //# sourceMappingURL=fbi.js.map
+//# sourceMappingURL=fbi.js.map

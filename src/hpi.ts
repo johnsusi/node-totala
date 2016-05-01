@@ -1,6 +1,5 @@
-"use strict"
-
 const assert = require('assert');
+// const Buffer = require('buffer');
 const fs     = require('fs');
 const path   = require('path');
 const zlib   = require('zlib');
@@ -13,134 +12,155 @@ function constant(str) : number {
          (str.charCodeAt(3) << 24);
 }
 
-const temp_buffer_64k = new Buffer(65536);
+const temp_buffer_64k = Buffer.alloc(65536);
 
 const default_options = {
   out: __dirname,
   verbose: false,
+  trace: false,
 };
 
-let options = default_options;
+// let options = default_options;
 
-require('yargs')
-  .usage('$0 <cmd> [args]')
+const options = require('yargs')
+  .usage('$0 files... [options]')
   .option('out', {
     alias: 'o',
     describe: 'Expand files into dir',
-    default: default_options.out,
+    string: true,
+    demand: true,
   })
   .option('verbose', {
-    alias: 'v',
+    alias: ['v'],
     describe: 'Verbose output',
-    default: default_options.verbose,
+    default: false,
+    boolean: true,
   })
-  .command('x [files...]', 'eXtract files', {}, extract)
+  .option('trace', {
+    describe: 'Print stacktrace on errors',
+    default: false,
+    boolean: true,
+  })
   .help('help')
   .argv;
 
-  function extract(argv) {
-    options = {
-      out: path.resolve(__dirname, (argv.out || argv.o || default_options.out)),
-      verbose: argv.v || argv.verbose || default_options.verbose,
-    };
-    for (let file of argv.files) {
-      const buffer = fs.readFileSync(path.resolve(__dirname, file));
-      hpi_extract(buffer, options);
+options.out = path.resolve(process.cwd(), options.out);
+for (let file of options._) {
+  try {
+    const buffer = fs.readFileSync(path.resolve(process.cwd(), file));
+    for (let {name, data} of hpi(buffer)) {
+
+      const full_name = path.resolve(options.out, name);
+      console.log(full_name);
+      mkdirp.sync(path.dirname(full_name));
+      fs.writeFileSync(full_name, data);
     }
   }
+  catch(err) {
+    if (options.trace) console.error(err.stack);
+    else console.error(err);
+  }
+}
 
-  function hpi_extract(buffer, {out}) {
-    console.log(out);
-    const marker           = buffer.readUInt32LE(0);
-    const save_marker      = buffer.readUInt32LE(4);
-    const directory_size   = buffer.readUInt32LE(8);
-    const header_key       = buffer.readUInt32LE(12);
-    const directory_offset = buffer.readUInt32LE(16);
+export function* hpi(buffer) {
+  const marker           = buffer.readUInt32LE(0);
+  const save_marker      = buffer.readUInt32LE(4);
+  const directory_size   = buffer.readUInt32LE(8);
+  const header_key       = buffer.readUInt32LE(12);
+  const directory_offset = buffer.readUInt32LE(16);
+
+  assert(marker == constant('HAPI'));
+
+  if (header_key) {
     const key = ~((header_key << 2) | (header_key >>> 6));
-
-    assert(marker == constant('HAPI'));
-
     for (let i = directory_offset;i < buffer.length;++i) {
-
       const tkey = i ^ key;
       buffer[i] = tkey ^ (~buffer[i]);
     }
-
-    hpi_dir(buffer, directory_offset, out);
   }
 
-  function hpi_dir(buffer, directory_offset, parent_name) {
-    const count = buffer.readUInt32LE(directory_offset);
-    const offset = buffer.readUInt32LE(directory_offset + 4);
-    for (let i = 0, j = offset; i < count;++i, j += 9) {
-      const name_offset = buffer.readUInt32LE(j);
-      const data_offset = buffer.readUInt32LE(j + 4);
-      const is_dir = buffer[j+8];
-      const name = read_asciiz(buffer, name_offset);
-      const full_name = path.join(parent_name, name);
-      if (is_dir) {
-        mkdirp.sync(full_name);
-        hpi_dir(buffer, data_offset, full_name);
+  for (let entry of hpi_dir(buffer, directory_offset, '')) yield entry;
+}
+
+function* hpi_dir(buffer, directory_offset, parent_name) {
+  const count = buffer.readUInt32LE(directory_offset);
+  const offset = buffer.readUInt32LE(directory_offset + 4);
+  for (let i = 0, j = offset; i < count;++i, j += 9) {
+    const name_offset = buffer.readUInt32LE(j);
+    const data_offset = buffer.readUInt32LE(j + 4);
+    const is_dir = buffer[j+8];
+    const name = read_asciiz(buffer, name_offset);
+    const full_name = path.join(parent_name, name);
+    if (is_dir) {
+      for (let entry of hpi_dir(buffer, data_offset, full_name)) yield entry;
+    }
+    else yield hpi_file(buffer, data_offset, full_name);
+  }
+}
+
+function hpi_file(buffer, offset, name) {
+  let data_offset = buffer.readUInt32LE(offset);
+  const file_size   = buffer.readUInt32LE(offset + 4);
+  const compressed  = buffer[offset + 8];
+  if (options.verbose) console.log(`${name}`);
+  const file_buffer = Buffer.alloc(file_size);
+  let file_offset = 0;
+  // fs.writeFileSync(name, new Buffer(0));
+  if (compressed) {
+    const chunk_count = (file_size >>> 16) + (file_size % 65536 > 0 ? 1 : 0);
+    let chunk_offset  = data_offset + chunk_count * 4
+    for (let i = 0;i < chunk_count;++i, data_offset += 4) {
+      const chunk_size        = buffer.readUInt32LE(data_offset);
+      const marker            = buffer.readUInt32LE(chunk_offset);
+      const unknown1          = buffer[chunk_offset + 4];
+      const compression       = buffer[chunk_offset + 5];
+      const encrypted         = buffer[chunk_offset + 6];
+      const compressed_size   = buffer.readUInt32LE(chunk_offset + 7);
+      const decompressed_size = buffer.readUInt32LE(chunk_offset + 11);
+      const checksum          = buffer.readUInt32LE(chunk_offset + 15);
+
+      assert(marker == constant('SQSH'));
+
+      const compressed_buffer = buffer.slice(chunk_offset + 19, chunk_offset + 19 + compressed_size);
+
+      let check = 0;
+      for (let x of compressed_buffer) check = (check + x) & 0xFFFFFFFF;
+      assert(check == checksum);
+
+      if (encrypted) decrypt(compressed_buffer);
+      if (compression == 1) {
+        decompress(compressed_buffer,
+                   file_buffer.slice(file_offset,
+                                     file_offset + decompressed_size));
+      }
+      else if (compression == 2) {
+        zlib.unzipSync(compressed_buffer).copy(file_buffer, file_offset);
       }
       else {
-        hpi_file(buffer, data_offset, full_name);
+        throw new Error('unknown compression');
       }
+      file_offset += decompressed_size;
+      chunk_offset += chunk_size;
     }
   }
+  else throw new Error('uncompressed not yet supported');
 
-  function hpi_file(buffer, offset, name) {
-    let data_offset = buffer.readUInt32LE(offset);
-    const file_size   = buffer.readUInt32LE(offset + 4);
-    const compressed  = buffer[offset + 8];
-    if (options.verbose) console.log(`${name}`);
-    fs.writeFileSync(name, new Buffer(0));
-    if (compressed) {
-      const chunk_count = (file_size >>> 16) + (file_size % 65536 > 0 ? 1 : 0);
-      let chunk_offset  = data_offset + chunk_count * 4
-      for (let i = 0;i < chunk_count;++i, data_offset += 4) {
-        const chunk_size = buffer.readUInt32LE(data_offset);
+  return {name, data: file_buffer};
+}
 
-        const marker            = buffer.readUInt32LE(chunk_offset);
-        const unknown1          = buffer[chunk_offset + 4];
-        const compression       = buffer[chunk_offset + 5];
-        const encrypted         = buffer[chunk_offset + 6];
-        const compressed_size   = buffer.readUInt32LE(chunk_offset + 7);
-        const decompressed_size = buffer.readUInt32LE(chunk_offset + 11);
-        const checksum          = buffer.readUInt32LE(chunk_offset + 15);
+function read_asciiz(buffer, offset) {
+  let end = offset;
+  while (buffer[end]) ++end;
+  return buffer.toString('ascii', offset, end);
+}
 
-        assert(marker == constant('SQSH'));
-
-        const compressed_buffer = buffer.slice(chunk_offset + 19, chunk_offset + 19 + compressed_size);
-        let decompressed_buffer = compressed_buffer;
-        if (encrypted) decrypt(compressed_buffer);
-        if (compression == 1) {
-          assert(decompressed_size <= temp_buffer_64k.length);
-          decompressed_buffer = temp_buffer_64k.slice(0, decompressed_size);
-          decompress(compressed_buffer, decompressed_buffer);
-        }
-        else if (compression == 2) {
-          throw new Error('zlib decompression not yet supported');
-        }
-        if (options.verbose) console.log(decompressed_buffer.length);
-        fs.appendFileSync(name, decompressed_buffer);
-        chunk_offset += chunk_size;
-      }
-    }
+function decrypt(buffer) {
+  for (let i = 0;i < buffer.length;++i) {
+    buffer[i] = (buffer[i] - i) ^ i;
   }
+}
 
-  function read_asciiz(buffer, offset) {
-    let end = offset;
-    while (buffer[end]) ++end;
-    return buffer.toString('ascii', offset, end);
-  }
-
-  function decrypt(buffer) {
-    for (let i = 0;i < buffer.length;++i) {
-      buffer[i] = (buffer[i] - i) ^ i;
-    }
-  }
-
-  function decompress(inbuff, out) {
+function decompress(inbuff, out) {
 
     const window = new Array(4096);
 
@@ -182,6 +202,6 @@ require('yargs')
         mask = 1;
         tag = inbuff[inptr++];
       }
-    }
-    return outptr;
+  }
+  return outptr;
 }
