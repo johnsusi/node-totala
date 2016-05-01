@@ -1,4 +1,4 @@
-'use strict';
+"use strict"
 
 const assert = require('assert');
 const fs     = require('fs');
@@ -184,4 +184,4 @@ require('yargs')
       }
     }
     return outptr;
-  }
+}
