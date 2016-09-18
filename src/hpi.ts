@@ -1,66 +1,14 @@
 const assert = require('assert');
-// const Buffer = require('buffer');
 const fs     = require('fs');
 const path   = require('path');
 const zlib   = require('zlib');
 const mkdirp = require('mkdirp');
 
-function constant(str) : number {
-  return  str.charCodeAt(0)        |
-         (str.charCodeAt(1) <<  8) |
-         (str.charCodeAt(2) << 16) |
-         (str.charCodeAt(3) << 24);
-}
+const { constant, read_asciiz } = require('./util');
+
+if (require.main === module) cli();
 
 const temp_buffer_64k = Buffer.alloc(65536);
-
-const default_options = {
-  out: __dirname,
-  verbose: false,
-  trace: false,
-};
-
-// let options = default_options;
-
-const options = require('yargs')
-  .usage('$0 files... [options]')
-  .option('out', {
-    alias: 'o',
-    describe: 'Expand files into dir',
-    string: true,
-    demand: true,
-  })
-  .option('verbose', {
-    alias: ['v'],
-    describe: 'Verbose output',
-    default: false,
-    boolean: true,
-  })
-  .option('trace', {
-    describe: 'Print stacktrace on errors',
-    default: false,
-    boolean: true,
-  })
-  .help('help')
-  .argv;
-
-options.out = path.resolve(process.cwd(), options.out);
-for (let file of options._) {
-  try {
-    const buffer = fs.readFileSync(path.resolve(process.cwd(), file));
-    for (let {name, data} of hpi(buffer)) {
-
-      const full_name = path.resolve(options.out, name);
-      console.log(full_name);
-      mkdirp.sync(path.dirname(full_name));
-      fs.writeFileSync(full_name, data);
-    }
-  }
-  catch(err) {
-    if (options.trace) console.error(err.stack);
-    else console.error(err);
-  }
-}
 
 export function* hpi(buffer) {
   const marker           = buffer.readUInt32LE(0);
@@ -79,21 +27,19 @@ export function* hpi(buffer) {
     }
   }
 
-  for (let entry of hpi_dir(buffer, directory_offset, '')) yield entry;
+  yield* hpi_dir(buffer, directory_offset, '');
 }
 
 function* hpi_dir(buffer, directory_offset, parent_name) {
-  const count = buffer.readUInt32LE(directory_offset);
+  const count  = buffer.readUInt32LE(directory_offset);
   const offset = buffer.readUInt32LE(directory_offset + 4);
   for (let i = 0, j = offset; i < count;++i, j += 9) {
     const name_offset = buffer.readUInt32LE(j);
     const data_offset = buffer.readUInt32LE(j + 4);
-    const is_dir = buffer[j+8];
-    const name = read_asciiz(buffer, name_offset);
-    const full_name = path.join(parent_name, name);
-    if (is_dir) {
-      for (let entry of hpi_dir(buffer, data_offset, full_name)) yield entry;
-    }
+    const directory   = buffer[j+8];
+    const name        = read_asciiz(buffer, name_offset);
+    const full_name   = path.join(parent_name, name);
+    if (directory) yield* hpi_dir(buffer, data_offset, full_name);
     else yield hpi_file(buffer, data_offset, full_name);
   }
 }
@@ -102,10 +48,8 @@ function hpi_file(buffer, offset, name) {
   let data_offset = buffer.readUInt32LE(offset);
   const file_size   = buffer.readUInt32LE(offset + 4);
   const compressed  = buffer[offset + 8];
-  if (options.verbose) console.log(`${name}`);
   const file_buffer = Buffer.alloc(file_size);
   let file_offset = 0;
-  // fs.writeFileSync(name, new Buffer(0));
   if (compressed) {
     const chunk_count = (file_size >>> 16) + (file_size % 65536 > 0 ? 1 : 0);
     let chunk_offset  = data_offset + chunk_count * 4
@@ -146,12 +90,6 @@ function hpi_file(buffer, offset, name) {
   else throw new Error('uncompressed not yet supported');
 
   return {name, data: file_buffer};
-}
-
-function read_asciiz(buffer, offset) {
-  let end = offset;
-  while (buffer[end]) ++end;
-  return buffer.toString('ascii', offset, end);
 }
 
 function decrypt(buffer) {
@@ -204,4 +142,46 @@ function decompress(inbuff, out) {
       }
   }
   return outptr;
+}
+
+function cli() {
+
+  const options = require('yargs')
+    .usage('$0 files... [options]')
+    .option('out', {
+      alias: 'o',
+      describe: 'Expand files into dir',
+      string: true,
+      demand: true,
+    })
+    .option('verbose', {
+      alias: ['v'],
+      describe: 'Verbose output',
+      default: false,
+      boolean: true,
+    })
+    .option('trace', {
+      describe: 'Print stacktrace on errors',
+      default: false,
+      boolean: true,
+    })
+    .help('help')
+    .argv;
+
+  options.out = path.resolve(process.cwd(), options.out);
+  for (let file of options._) {
+    try {
+      const buffer = fs.readFileSync(path.resolve(process.cwd(), file));
+      for (let {name, data} of hpi(buffer)) {
+        const full_name = path.resolve(options.out, name);
+        if (options.verbose) console.log(full_name);
+        mkdirp.sync(path.dirname(full_name));
+        fs.writeFileSync(full_name, data);
+      }
+    }
+    catch(err) {
+      if (options.trace) console.error(err.stack);
+      else console.error(err);
+    }
+  }
 }

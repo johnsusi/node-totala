@@ -1,1 +1,1 @@
-require('./fbi');
+if (require.main === module) require('./fbi').cli();

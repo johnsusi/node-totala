@@ -1,12 +1,13 @@
 require('source-map-support').install();
 
-const assert = require('assert');
-const fs     = require('fs');
-const path   = require('path');
-const zlib   = require('zlib');
-const mkdirp = require('mkdirp');
+const assert  = require('assert');
+const fs      = require('fs');
+const path    = require('path');
+const mkdirp  = require('mkdirp');
 const palette = require('./palette');
 const PNG     = require('pngjs').PNG;
+
+if (require.main === module) cli();
 
 function constant(str) : number {
   return  str.charCodeAt(0)        |
@@ -15,54 +16,18 @@ function constant(str) : number {
          (str.charCodeAt(3) << 24);
 }
 
-const options = require('yargs')
-  .usage('$0 <cmd> [args]')
-  .option('verbose', {
-    alias: 'v',
-    describe: 'Verbose output',
-    default: false,
-  })
-  .option('trace', {
-    describe: 'Print stack trace on error',
-    default: false,
-  })
-  .help('help')
-  .argv
-
-
-
-for (let file of options._) {
-
-  const resolved_name = path.resolve(process.cwd(), file);
-  const source        = fs.readFileSync(resolved_name);
-  const basename      = path.join(path.dirname(file), path.basename(file, path.extname(file)));
-  console.log(resolved_name);
-  for (let {name, frames} of gaf(source)) {
-    const out_name = path.resolve(process.cwd(), path.join(basename, name) );
-    console.log(`${out_name} [${frames.length}]`);
-    if (frames.length == 1) {
-      mkdirp.sync(path.dirname(out_name));
-      write_png(out_name + '.png', frames[0]);
-    }
-    else {
-      mkdirp.sync(out_name)
-      frames.forEach( (frame, i) => write_png(path.join(out_name, i + '.png'), frame) );
-    }
-  }
-}
-
-export function* gaf(buffer: Buffer) {
+export function* gaf(buffer: Buffer, options = {}) {
   const version = buffer.readUInt32LE(0);
   const count   = buffer.readUInt32LE(4);
   const unknown = buffer.readUInt32LE(8);
   assert(version == 0x00010100);
   for (let i = 0, offset = 12;i < count;++i, offset += 4) {
     const entry_offset = buffer.readUInt32LE(offset);
-    yield* frames(buffer, entry_offset);
+    yield* frames(buffer, entry_offset, options);
   }
 }
 
-function* frames(buffer, offset) : Iterable<any> {
+function* frames(buffer, offset, options) : Iterable<any> {
 
   const frame_count = buffer.readUInt16LE(offset);
   const unknown1    = buffer.readUInt16LE(offset + 2);
@@ -76,7 +41,7 @@ function* frames(buffer, offset) : Iterable<any> {
   for (let i = 0;i < frame_count;++i, offset += 8) {
     const frame_offset = buffer.readUInt32LE(offset);
     const unknown3     = buffer.readUInt32LE(offset + 4);
-    frames.push(frame(buffer, frame_offset));
+    frames.push(frame(buffer, frame_offset, options));
   }
   yield { name, frames };
 }
@@ -125,7 +90,7 @@ function decode_rgba(buffer, out, width, height) {
   }
 }
 
-function frame(buffer, offset) : any {
+function frame(buffer, offset, options) : any {
   const width          = buffer.readUInt16LE(offset);
   const height         = buffer.readUInt16LE(offset + 2);
   const xpos           = buffer.readInt16LE(offset + 4);
@@ -158,7 +123,7 @@ function frame(buffer, offset) : any {
   else {
     for (let i = 0;i < subframe_count;++i) {
       const frame_offset = buffer.readUInt32LE(data_offset + i * 4);
-      frame(buffer, frame_offset);
+      frame(buffer, frame_offset, options);
     }
     throw new Error('Unsupported format');
   }
@@ -168,4 +133,41 @@ function write_png(file, image) {
   const img = new PNG({width: image.width, height: image.height});
   img.data = image.data;
   fs.writeFileSync(file, PNG.sync.write(img));
+}
+
+function cli() {
+
+  const options = require('yargs')
+    .usage('$0 <cmd> [args]')
+    .option('verbose', {
+      alias: 'v',
+      describe: 'Verbose output',
+      default: false,
+    })
+    .option('trace', {
+      describe: 'Print stack trace on error',
+      default: false,
+    })
+    .help('help')
+    .argv;
+
+  for (let file of options._) {
+
+    const resolved_name = path.resolve(process.cwd(), file);
+    const source        = fs.readFileSync(resolved_name);
+    const basename      = path.join(path.dirname(file), path.basename(file, path.extname(file)));
+    if (options.verbose) console.log(resolved_name);
+    for (let {name, frames} of gaf(source, options)) {
+      const out_name = path.resolve(process.cwd(), path.join(basename, name) );
+      if (options.verbose) console.log(`${out_name} [${frames.length}]`);
+      if (frames.length == 1) {
+        mkdirp.sync(path.dirname(out_name));
+        write_png(out_name + '.png', frames[0]);
+      }
+      else {
+        mkdirp.sync(out_name)
+        frames.forEach( (frame, i) => write_png(path.join(out_name, i + '.png'), frame) );
+      }
+    }
+  }
 }

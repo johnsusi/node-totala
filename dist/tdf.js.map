@@ -1,1 +1,1 @@
-{"version":3,"sources":["../tmp/ts/tdf.js"],"names":[],"mappings":";;AAAA,QAAQ,OAAR","file":"tdf.js","sourcesContent":["require('./fbi');\n//# sourceMappingURL=tdf.js.map"]}
+{"version":3,"file":"tdf.js","sourceRoot":"","sources":["../src/tdf.ts"],"names":[],"mappings":"AAAA,EAAE,CAAC,CAAC,OAAO,CAAC,IAAI,KAAK,MAAM,CAAC;IAAC,OAAO,CAAC,OAAO,CAAC,CAAC,GAAG,EAAE,CAAC"}

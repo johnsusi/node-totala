@@ -1,5 +1,3 @@
-'use strict';
-
-require('./fbi');
-//# sourceMappingURL=tdf.js.map
+if (require.main === module)
+    require('./fbi').cli();
 //# sourceMappingURL=tdf.js.map

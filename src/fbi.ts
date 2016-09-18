@@ -1,6 +1,8 @@
 import * as fs   from 'fs';
 import * as path from 'path';
 
+if (require.main === module) cli();
+
 function *parser(source) : Iterable<any> {
     let buffer = '', prev = null, tag = null;
     for (let sc of source) {
@@ -65,7 +67,7 @@ export function parse(source, { verbose = false, comments = false }) {
   return result;
 }
 
-(function main() {
+function cli() {
 
   const options = require('yargs')
     .usage('Usage: $0 file... [options]')
@@ -121,4 +123,4 @@ export function parse(source, { verbose = false, comments = false }) {
   const json = JSON.stringify(result, null, options.pp ? 2 : 0);
   process.stdout.write(json);
 
-})();
+}
