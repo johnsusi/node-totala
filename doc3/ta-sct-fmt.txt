@@ -1,0 +1,44 @@
+SCT file format (TA sections)
+Written by Kinboat, 1998.
+*****************************
+
+** Note **
+In order for these sections to work in TAE, their dimensions must be
+a multiple of 128.
+
+** File Header (28 bytes) *)
+typedef struct _SCTHEADER {
+  long Version;		// SCT Version.  Set to 3.
+  long PtrMinimap;	// Offset to the section's minimap.
+  long NumTiles;	// The number of tiles in the section.
+  long PtrTiles;	// Offset to the section's tiles.
+  long Width;		// Width of the section.
+  long Height;		// Height of the section.
+  long PtrData;		// Offset to the section's data.
+} SCTHEADER;
+
+
+** TileData (PtrTiles) **
+Each tile is 32x32 pixels.
+
+BYTE TileData[NumTiles * 1024];
+
+
+** SectionData (PtrSectionData) **
+short SectionData[SectionWidth*SectionHeight];
+  This array is an array of index values pointing to tiles stored in 
+  the TileData.
+
+typedef struct _HEIGHTDATA {
+  BYTE Height;		// Height value.
+  short Constant1;	// Always -1.
+  BYTE Constant2;	// Always 0.
+} HEIGHTDATA;
+
+HEIGHTDATA HeightData[SectionWidth * SectionHeight * 4]
+  This is an array to the 3D height data for the section.  Each tile
+  pointed to by SectionData has 4 height values.
+
+
+** Minimap (PtrMinimap) **
+BYTE Minimap[128 * 128];
