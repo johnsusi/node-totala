@@ -1,25 +1,135 @@
 #include "hpi.h"
 #include "file.h"
 
-#undef NDEBUG
 #include <algorithm>
 #include <cassert>
 #include <deque>
+#include <fstream>
 #include <iostream>
+#include <map>
+#include <memory>
 
 #include "zlib.h"
 
-TAHPIFile::TAHPIFile(const std::string &filename)
-    : file(std::ifstream(filename, std::ios::binary)), key(0)
+class TAHPIFile::impl
 {
-  assert(file.is_open());
-  readDirectory();
+
+public:
+  struct Entry
+  {
+    std::uint32_t offset;
+    std::uint32_t file_size;
+    std::uint8_t flag;
+  };
+  struct Archive
+  {
+    std::ifstream file;
+    std::uint32_t key;
+    std::map<std::string, Entry> entries;
+  };
+  std::map<std::string, std::unique_ptr<Archive>> archives;
+  std::map<std::string, Archive*> files;
+
+  void LoadArchive(const std::string &filename)
+  {
+    auto archive = std::make_unique<Archive>();
+    archive->file = std::ifstream { filename, std::ios::binary };
+    archive->key = 0;
+
+    readDirectory(archive.get());
+
+    archives.emplace(filename, std::move(archive));
+  }
+
+  void readDirectory(Archive *archive)
+  {
+
+    auto &file = archive->file;
+    auto &key = archive->key;
+
+    std::uint32_t hHPIMarker, hSaveMarker, hDirectorySize, hHeaderKey, hStart;
+
+    assert(read(file, &hHPIMarker));
+    assert(read(file, &hSaveMarker));
+    assert(read(file, &hDirectorySize));
+    assert(read(file, &hHeaderKey));
+    assert(read(file, &hStart));
+
+    assert(hHPIMarker == 0x49504148);
+
+    auto directory = std::string(hDirectorySize, '\0');
+
+    file.read(directory.data() + hStart, hDirectorySize - hStart);
+
+    if (hHeaderKey)
+    {
+      key = ~((hHeaderKey << 2) | (hHeaderKey >> 6));
+
+      for (auto i = hStart; i < hDirectorySize; ++i)
+      {
+        auto tkey = i ^ key;
+        directory[i] = tkey ^ ~directory[i];
+      }
+    }
+
+    using node_t = std::pair<std::size_t, std::string>;
+    auto fringe = std::deque<node_t>{{hStart, ""}};
+
+    while (!fringe.empty())
+    {
+      auto [offset, path] = fringe.front();
+      fringe.pop_front();
+
+      std::uint32_t hCount, hOffset;
+      assert(read(directory, &hCount, offset));
+      assert(read(directory, &hOffset, offset + 4));
+
+      for (std::uint32_t i = 0; i < hCount; ++i)
+      {
+        std::uint32_t hNameOffset, hDirDataOffset;
+        std::uint8_t hFlag;
+        assert(read(directory, &hNameOffset, hOffset + i * 9));
+        assert(read(directory, &hDirDataOffset, hOffset + i * 9 + 4));
+        assert(read(directory, &hFlag, hOffset + i * 9 + 8));
+
+        std::string hName = path;
+        assert(read(directory, &hName, hNameOffset));
+
+        if (hFlag)
+          fringe.emplace_back(hDirDataOffset, hName + "/");
+        else
+        {
+          std::uint32_t hDataOffset, hFileSize;
+          std::uint8_t hFlag;
+          assert(read(directory, &hDataOffset, hDirDataOffset));
+          assert(read(directory, &hFileSize, hDirDataOffset + 4));
+          assert(read(directory, &hFlag, hDirDataOffset + 8));
+          std::transform(hName.begin(), hName.end(), hName.begin(), [](auto ch) { return std::tolower(ch); });
+          archive->entries[hName] = {hDataOffset, hFileSize, hFlag};
+          files[hName] = archive;
+        }
+      }
+    }
+  }
+};
+
+TAHPIFile::TAHPIFile() : _pimpl(std::make_unique<impl>())
+{
+}
+
+TAHPIFile::~TAHPIFile()
+{
+}
+
+void TAHPIFile::LoadArchive(const std::string &filename)
+{
+  _pimpl->LoadArchive(filename);
 }
 
 auto TAHPIFile::Files() const -> std::vector<std::string>
 {
   std::vector<std::string> result;
-  for (auto [name, entry] : entries)
+  for (auto &[name, _] : _pimpl->files)
     result.push_back(name);
   return result;
 }
@@ -42,74 +152,6 @@ bool readAndDecrypt(std::ifstream &file, char *data, std::size_t offset, std::ui
   if (key)
     decrypt(data, offset, size, key);
   return true;
-}
-
-void TAHPIFile::readDirectory()
-{
-
-  std::uint32_t hHPIMarker, hSaveMarker, hDirectorySize, hHeaderKey, hStart;
-
-  assert(read(file, &hHPIMarker));
-  assert(read(file, &hSaveMarker));
-  assert(read(file, &hDirectorySize));
-  assert(read(file, &hHeaderKey));
-  assert(read(file, &hStart));
-
-  assert(hHPIMarker == 0x49504148);
-
-  auto directory = std::string(hDirectorySize, '\0');
-
-  file.read(directory.data() + hStart, hDirectorySize - hStart);
-
-  if (hHeaderKey)
-  {
-    key = ~((hHeaderKey << 2) | (hHeaderKey >> 6));
-
-    for (auto i = hStart; i < hDirectorySize; ++i)
-    {
-      auto tkey = i ^ key;
-      directory[i] = tkey ^ ~directory[i];
-    }
-  }
-
-
-  using node_t = std::pair<std::size_t, std::string>;
-  auto fringe = std::deque<node_t>{{hStart, ""}};
-
-  while (!fringe.empty())
-  {
-    auto [offset, path] = fringe.front();
-    fringe.pop_front();
-
-    std::uint32_t hCount, hOffset;
-    assert(read(directory, &hCount, offset));
-    assert(read(directory, &hOffset, offset + 4));
-
-    for (std::uint32_t i = 0; i < hCount; ++i)
-    {
-      std::uint32_t hNameOffset, hDirDataOffset;
-      std::uint8_t hFlag;
-      assert(read(directory, &hNameOffset, hOffset + i * 9));
-      assert(read(directory, &hDirDataOffset, hOffset + i * 9 + 4));
-      assert(read(directory, &hFlag, hOffset + i * 9 + 8));
-
-      std::string hName = path;
-      assert(read(directory, &hName, hNameOffset));
-
-      if (hFlag)
-        fringe.emplace_back(hDirDataOffset, hName + "/");
-      else
-      {
-        std::uint32_t hDataOffset, hFileSize;
-        std::uint8_t hFlag;
-        assert(read(directory, &hDataOffset, hDirDataOffset));
-        assert(read(directory, &hFileSize, hDirDataOffset + 4));
-        assert(read(directory, &hFlag, hDirDataOffset + 8));
-        std::transform(hName.begin(), hName.end(), hName.begin(), [](auto ch) { return std::tolower(ch); });
-        entries[hName] = {hDataOffset, hFileSize, hFlag};
-      }
-    }
-  }
 }
 
 void decompressLZ77(char *data, char *target, std::size_t length)
@@ -172,10 +214,13 @@ void decompressZLIB(char *data, char *target, std::size_t length)
   inflateEnd(&infstream);
 }
 
-auto TAHPIFile::ReadFile(const std::string &name) -> std::string
+auto TAHPIFile::ReadFile(std::string name) -> std::string
 {
-  auto entry = entries[name];
+  auto archive = _pimpl->files.at(name);
+  auto entry = archive->entries.at(name);
   auto result = std::string(entry.file_size, '\0');
+  auto &file = archive->file;
+  auto &key = archive->key;
 
   if (entry.flag == 0 /* uncompressed */)
   {
@@ -225,7 +270,8 @@ auto TAHPIFile::ReadFile(const std::string &name) -> std::string
           decompressLZ77(buffer.data() + 19, result.data() + resultOffset, hCompressedSize);
         else if (hCompMethod == 2)
           decompressZLIB(buffer.data() + 19, result.data() + resultOffset, hCompressedSize);
-        else throw std::runtime_error("Unknown compression method");
+        else
+          throw std::runtime_error("Unknown compression method");
       }
       resultOffset += 65536;
     }

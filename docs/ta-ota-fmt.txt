@@ -1,0 +1,60 @@
+Initial Mission Commands
+
+	The Initial Mission selection is the true heart of mission creation. Most missions created do not rely on the AI to handle the battle, rather, everything is carefully planned ahead.  Having units wait until they are attacked, having groups of units attack at the same time, having them target specific units, even roving patrols, are all commands that are set here.  Giving all (or most) of your enemy units a series of commands that interact and mesh to make an appropriate defense (and offense) is what mission creation is all about. If a Unit is given no initial commands, or runs out of commands, the AI will take over, if it is a Computer controlled Unit (anything other than Player 1). If it is a Player controlled Unit and you want the Player to be able to interrupt the initial commands, insert a "s" (to make it selectable) in the initial command list.
+  
+	What follows is a list of the available commands; use a comma to separate commands.  Remember that all unit references should be to the unit’s name, not the unit’s description (e.g. CORTL not Core Torpedo Launcher).
+
+	m X Y		
+
+	Tells the Unit to move to coordinates X and Y as measured in pixels; see "Location" on the Status Bar at the bottom of the program window.
+
+	p X Y
+
+	Tells the unit to patrol from the coordinate at which it is presently to the coordinate that follows the "p" and back again. If only one coordinate is given the computer will assume the starting point to be the second point in the command list. If you give two points (p X Y  X Y), the unit will patrol between those two points. If you give three points, the Unit will patrol between those three points in the order given, etc. You can specify any number of points in this way. The patrol command should be at the end of the command list, since once on patrol, it will ignore all later commands.
+
+	a UNITNAME
+
+	Tells the Unit to attack the nearest specified Unit. This could be either a Unit Type (for example "a ARMCOM") or a unique identifier (for example "a FRED"). If there are no units of the specified Type, the AI will take control of the unit.
+
+	w SECONDS
+
+	Tells Unit to wait at its present location for the specified number of seconds before continuing with the command list. You can specify fractional seconds (e.g. "w 0.5").
+
+	b UNITTYPE X Y
+
+	Mobile Construction Units only. Tells the Construction Unit (or Commander) to build a Unit of the specified Type at location X Y.
+
+	b UNITTYPE n
+
+	Construction Building. Tells the Construction Building to build n Units of type UNITTYPE on its construction pad.
+
+	d	
+
+	Destroys the Unit instantly.
+
+	s
+
+	Makes the Unit selectable even though the initial command list isn’t completed yet, allowing the AI or player to take control of the Unit.
+
+	i UNITNAME
+
+	Place this Unit in the specified transport. (e.g. "i ARMSHIP" or if there is more than one transport give the transport a unique identifier e.g. "i JAKE"). 
+
+	u XY
+
+	You can then tell the transport where to unload the unit that it carries by designating u XY. 
+
+	wa
+
+	In the initial mission list will wait until the unit is attacked.
+
+	"wa otherunit" will wait until otherunit is attacked. This works like the "i" mission--otherunit identifies a specific unit, not a general type of unit.  In order for this command to work, ‘otherunit’ must be given a unique name.
+
+	Example:  Let’s say for a moment, that you’re in the middle of creating an Arm mission, for which the goal is to get your squad of Zeus into the enemy’s base and take out their fusion plant.  While setting up the defenses, you might program a fleet of Rapier gunships to wait until the Arm lightning-chuckers have destroyed a radar tower abandoned in the middle of a valley, move to co-ordinates 513, 700, followed by a run on the Arm Commander, nestled in it’s camp.  To spring your little trap, you would need to do the following setup.
+
+	-Place radar tower with unique name (e.g. "TRAP")
+	-Place Rapier units, each with the following initial command string:
+
+	wa TRAP, a ARMZEUS, m 513 700, a ARMCOM
+
+	-It’s very important to make sure that you’ve provided the player with at least one Zeus unit to start with.  If there is no Zeus units on the map, the Rapiers will simply skip that command and go straight after the Commander.  Upon destruction of the radar tower by any other unit than a Zeus, the Rapiers will still search out the Zeus and try to kill it.

@@ -1,21 +1,19 @@
 #pragma once
-#ifndef __3DO_H__
-#define __3DO_H__
+#ifndef __COB_H__
+#define __COB_H__
 
 #include <memory>
 #include <ostream>
 #include <string>
 
-class TA3DOFile
+class TACOBFile
 {
 
 public:
-  TA3DOFile(const std::string&);
-  ~TA3DOFile();
+  TACOBFile(const std::string&);
+  ~TACOBFile();
 
-
-
-  void ExportToCollada(std::ostream&);
+  void ExportToPython(std::ostream&);
 
 private:
   class impl;
